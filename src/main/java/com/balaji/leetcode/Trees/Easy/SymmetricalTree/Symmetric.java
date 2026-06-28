@@ -1,0 +1,20 @@
+package com.balaji.leetcode.Trees.Easy.SymmetricalTree;
+
+import com.balaji.leetcode.Trees.TreeNode;
+
+public class Symmetric {
+    public boolean isSymmetric(TreeNode root) {
+        return isSymmetrical(root.left, root.right);
+
+    }
+
+    public boolean isSymmetrical(TreeNode node1, TreeNode node2) {
+        if(node1 == null && node2 == null) {
+            return true;
+        }
+        if(node1 != null && node2 != null && node1.val == node2.val) {
+            return isSymmetrical(node1.left, node2.right) && isSymmetrical(node1.right, node2.left);
+        }
+        return false;
+    }
+}
