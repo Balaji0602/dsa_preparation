@@ -1,0 +1,31 @@
+name: Notify Developer (PR Created)
+
+on:
+  pull_request:
+    types: [opened]
+
+jobs:
+  send-notification:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "[PR Created] Ready for Review - ${{ github.event.pull_request.title }}"
+          to: ${{ secrets.DEVELOPER_EMAIL }}
+          from: "DSA Repo Automation <noreply@github.com>"
+          secure: true
+          html_body: |
+            <h2>Your Pull Request has been created successfully and is ready for review.</h2>
+            <p><strong>Repository:</strong> ${{ github.repository }}</p>
+            <p><strong>Branch:</strong> ${{ github.event.pull_request.head.ref }}</p>
+            <p><strong>Commit:</strong> ${{ github.event.pull_request.head.sha }}</p>
+            <p><strong>PR Title:</strong> ${{ github.event.pull_request.title }}</p>
+            <p><strong>PR Link:</strong> <a href="${{ github.event.pull_request.html_url }}">${{ github.event.pull_request.html_url }}</a></p>
+            <p><strong>Commit Message:</strong> ${{ github.event.pull_request.body }}</p>
+            <hr/>
+            <p><em>This is an automated message. Please review the changes on GitHub.</em></p>

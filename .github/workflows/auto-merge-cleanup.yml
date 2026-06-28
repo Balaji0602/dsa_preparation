@@ -1,0 +1,74 @@
+name: PR Auto-Merge & Result Notifications
+
+on:
+  pull_request_review:
+    types: [submitted]
+  pull_request:
+    types: [closed]
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request_review' && github.event.review.state == 'approved'
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Attempt Auto-Merge
+        env:
+          GH_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUM=${{ github.event.pull_request.number }}
+          echo "Attempting to merge PR #$PR_NUM"
+          
+          # Try squashing and deleting the branch
+          gh pr merge "$PR_NUM" --squash --delete-branch --body "Auto-merged by PR review approval workflow" || \
+          gh pr merge "$PR_NUM" --merge --delete-branch --body "Auto-merged by PR review approval workflow"
+
+  notify-merge-or-reject:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Send Merged Notification
+        if: github.event.pull_request.merged == true
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "[PR Merged Successfully] ${{ github.event.pull_request.title }}"
+          to: "${{ secrets.DEVELOPER_EMAIL }},${{ secrets.APPROVER_EMAIL }}"
+          from: "DSA Repo Automation <noreply@github.com>"
+          secure: true
+          html_body: |
+            <h2>Pull Request Merged Successfully</h2>
+            <p><strong>PR Title:</strong> ${{ github.event.pull_request.title }}</p>
+            <p><strong>PR Link:</strong> <a href="${{ github.event.pull_request.html_url }}">${{ github.event.pull_request.html_url }}</a></p>
+            <p><strong>Merged By:</strong> ${{ github.actor }}</p>
+            <p><strong>Target Branch:</strong> main</p>
+            <p><strong>Source Branch:</strong> ${{ github.event.pull_request.head.ref }}</p>
+            <p>The feature branch has been deleted from the repository.</p>
+            <hr/>
+            <p><em>Keep up the great work! Happy coding!</em></p>
+
+      - name: Send Rejected/Closed Notification
+        if: github.event.pull_request.merged == false
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "[PR Closed/Rejected] ${{ github.event.pull_request.title }}"
+          to: ${{ secrets.DEVELOPER_EMAIL }}
+          from: "DSA Repo Automation <noreply@github.com>"
+          secure: true
+          html_body: |
+            <h2>Pull Request Closed Without Merge</h2>
+            <p>Your Pull Request has been closed or rejected by the reviewer.</p>
+            <p><strong>PR Title:</strong> ${{ github.event.pull_request.title }}</p>
+            <p><strong>PR Link:</strong> <a href="${{ github.event.pull_request.html_url }}">${{ github.event.pull_request.html_url }}</a></p>
+            <p><strong>Closed By:</strong> ${{ github.actor }}</p>
+            <hr/>
+            <p>Please review the comments on the PR, update your branch, and reopen or submit a new PR when ready.</p>

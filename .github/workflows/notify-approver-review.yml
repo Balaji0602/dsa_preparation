@@ -1,0 +1,73 @@
+name: Notify Approver (Final Approval Required)
+
+on:
+  pull_request:
+    types: [labeled]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  check-and-notify:
+    runs-on: ubuntu-latest
+    # Trigger if 'approved' label was added, OR if an approving review was submitted
+    if: |
+      (github.event_name == 'pull_request' && github.event.label.name == 'approved') ||
+      (github.event_name == 'pull_request_review' && github.event.review.state == 'approved')
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get Changed Files & Metadata
+        id: pr-metadata
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUM=${{ github.event.pull_request.number || github.event.issue.number }}
+          if [ -z "$PR_NUM" ]; then
+            PR_NUM=$(echo "${{ github.event.review.pull_request_url }}" | awk -F'/' '{print $NF}')
+          fi
+          echo "PR Number: $PR_NUM"
+          
+          # Fetch PR details using GH CLI
+          PR_JSON=$(gh pr view "$PR_NUM" --json title,body,author,headRefName,headRefOid,htmlUrl)
+          
+          # Write details to outputs
+          echo "pr_title=$(echo "$PR_JSON" | jq -r '.title')" >> $GITHUB_OUTPUT
+          echo "pr_url=$(echo "$PR_JSON" | jq -r '.htmlUrl')" >> $GITHUB_OUTPUT
+          echo "pr_author=$(echo "$PR_JSON" | jq -r '.author.login')" >> $GITHUB_OUTPUT
+          echo "pr_branch=$(echo "$PR_JSON" | jq -r '.headRefName')" >> $GITHUB_OUTPUT
+          echo "pr_commit=$(echo "$PR_JSON" | jq -r '.headRefOid')" >> $GITHUB_OUTPUT
+          
+          # Get list of changed files
+          FILES=$(git diff --name-only origin/main..${{ github.sha }} || git diff --name-only origin/main..HEAD || echo "Multiple files")
+          FILES_HTML=$(echo "$FILES" | sed 's/$/<br\/>/')
+          echo "pr_files=$FILES_HTML" >> $GITHUB_OUTPUT
+
+      - name: Send Email to Approver
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "[Final Approval Required] Review Request: ${{ steps.pr-metadata.outputs.pr_title }}"
+          to: ${{ secrets.APPROVER_EMAIL }}
+          from: "DSA Repo Automation <noreply@github.com>"
+          secure: true
+          html_body: |
+            <h2>Final Approval Required</h2>
+            <p>The developer has approved the Pull Request and signed off on this solution.</p>
+            <hr/>
+            <p><strong>Developer Name:</strong> ${{ steps.pr-metadata.outputs.pr_author }}</p>
+            <p><strong>PR Link:</strong> <a href="${{ steps.pr-metadata.outputs.pr_url }}">${{ steps.pr-metadata.outputs.pr_url }}</a></p>
+            <p><strong>Branch:</strong> ${{ steps.pr-metadata.outputs.pr_branch }}</p>
+            <p><strong>Commit:</strong> ${{ steps.pr-metadata.outputs.pr_commit }}</p>
+            <p><strong>Approval Status:</strong> Developer Approved</p>
+            <p><strong>Review Comments / PR Details:</strong></p>
+            <blockquote>${{ github.event.review.body || 'No review comments provided' }}</blockquote>
+            <p><strong>Files Changed:</strong></p>
+            <code>${{ steps.pr-metadata.outputs.pr_files }}</code>
+            <hr/>
+            <p>Please log in to GitHub to review, approve, and merge this Pull Request.</p>

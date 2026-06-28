@@ -1,0 +1,76 @@
+name: Repository Setup (Labels & Milestones)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Create GitHub Labels
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          labels=(
+            "easy:0e8a16:Easy difficulty LeetCode problems"
+            "medium:fbca04:Medium difficulty LeetCode problems"
+            "hard:d93f0b:Hard difficulty LeetCode problems"
+            "arrays:1d76db:Array/Matrix structures and algorithms"
+            "strings:0052cc:String manipulation and parsing"
+            "linked-list:5319e7:Linked List traversal and manipulation"
+            "trees:0e8a16:Binary trees, BST, and N-ary trees"
+            "graphs:bfdadc:BFS, DFS, Dijkstra, Minimum Spanning Trees"
+            "dynamic-programming:f9d0c4:Dynamic Programming and memoization"
+            "greedy:2c3e50:Greedy strategy optimizations"
+            "backtracking:b60205:Backtracking state searches"
+            "sliding-window:e9967a:Sliding Window operations"
+            "two-pointers:8fbc8f:Two pointer techniques"
+            "binary-search:4682b4:Binary Search methods"
+            "heap:d35400:Priority Queue and Heap solutions"
+            "stack:9b59b6:Stack (LIFO) solutions"
+            "queue:1abc9c:Queue (FIFO) solutions"
+            "union-find:34495e:Disjoint Set Union solutions"
+            "tries:3498db:Prefix Trees"
+            "bit-manipulation:7f8c8d:Bitwise operators"
+            "needs-review:fbca04:Awaiting peer/maintainer review"
+            "approved:0e8a16:Approved and ready to merge"
+            "merged:6f42c1:Successfully integrated into main branch"
+            "documentation:0052cc:Modifications to markdown files or diagrams"
+          )
+
+          for label in "${labels[@]}"; do
+            IFS=":" read -r name color description <<< "$label"
+            echo "Processing label: $name ($color)"
+            gh label create "$name" --color "$color" --description "$description" --force || true
+          done
+
+      - name: Create Milestones
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          milestones=(
+            "50 Problems:Achieve first milestone of solving 50 LeetCode problems"
+            "100 Problems:Solve 100 LeetCode problems"
+            "250 Problems:Solve 250 LeetCode problems"
+            "500 Problems:Solve 500 LeetCode problems"
+            "1000 Problems:Solve 1000 LeetCode problems"
+          )
+
+          for milestone in "${milestones[@]}"; do
+            IFS=":" read -r title description <<< "$milestone"
+            echo "Processing milestone: $title"
+            # Check if milestone already exists using GitHub API
+            exists=$(gh api repos/${{ github.repository }}/milestones --jq ".[] | select(.title==\"$title\") | .number")
+            if [ -z "$exists" ]; then
+              gh api repos/${{ github.repository }}/milestones -f title="$title" -f description="$description" || true
+            else
+              echo "Milestone '$title' already exists."
+            fi
+          done

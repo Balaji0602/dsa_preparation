@@ -1,0 +1,12 @@
+# Global Owners (fallback for all files)
+*       @Balaji0602
+
+# Core Infrastructure and CI/CD Automation
+/.github/workflows/   @Balaji0602
+
+# DSA Documentation and Coding Templates
+/docs/                @Balaji0602
+
+# LeetCode Problem Solvers
+/leetcode/            @Balaji0602
+/src/                 @Balaji0602

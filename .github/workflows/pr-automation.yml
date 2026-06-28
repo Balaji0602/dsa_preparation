@@ -1,0 +1,153 @@
+name: PR Automation (CI & Create)
+
+on:
+  push:
+    branches-ignore:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  validate-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Validate Branch Name
+        run: |
+          BRANCH_NAME="${{ github.ref_name }}"
+          # Regex matches: feature/*, bugfix/*, docs/*, refactor/*, test/*, chore/*
+          VALID_PATTERN="^(feature|bugfix|docs|refactor|test|chore)/.+$"
+          if [[ ! "$BRANCH_NAME" =~ $VALID_PATTERN ]]; then
+            echo "::error::Branch name '$BRANCH_NAME' is invalid! It must follow the format: feature/..., bugfix/..., docs/..., refactor/..., test/..., chore/..."
+            exit 1
+          fi
+          echo "Branch name is valid."
+
+      - name: Validate Commit Messages
+        run: |
+          # Fetch main to compare commits
+          git fetch origin main:main
+          COMMITS=$(git log origin/main..HEAD --oneline)
+          echo "Commits to validate:"
+          echo "$COMMITS"
+
+          # Conventional Commits regex
+          CONVENTIONAL_REGEX="^(feat|fix|docs|style|refactor|test|chore|perf|ci|build)(\([a-z0-9-]+\))?!?: .+$"
+          
+          while read -r commit; do
+            if [ -z "$commit" ]; then continue; fi
+            # Extract commit message without hash
+            msg=$(echo "$commit" | cut -d' ' -f2-)
+            if [[ ! "$msg" =~ $CONVENTIONAL_REGEX ]]; then
+              echo "::error::Commit message '$msg' does not follow Conventional Commits guidelines!"
+              exit 1
+            fi
+          done <<< "$COMMITS"
+          echo "All commit messages are valid."
+
+      - name: Build & Run Tests with Maven
+        run: |
+          # Compile, run JUnit 5 tests, and execute Checkstyle validation
+          mvn clean test checkstyle:check
+
+      - name: Extract Problem Details & Auto-create PR
+        env:
+          GH_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          # Fetch list of changed files
+          CHANGED_FILES=$(git diff --name-only origin/main...HEAD)
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+
+          # Identify Java solution and markdown document files
+          JAVA_FILE=$(echo "$CHANGED_FILES" | grep -E "^src/main/java/com/balaji/leetcode/[a-zA-Z0-9_/]+\.java$" | head -n 1 || true)
+          DOC_FILE=$(echo "$CHANGED_FILES" | grep -E "^leetcode/[a-zA-Z0-9_/]+-[a-z0-9-]+\.md$" | head -n 1 || true)
+
+          CATEGORY="general"
+          PROBLEM_NAME="solution"
+          DIFFICULTY="medium"
+          PROBLEM_NUM=""
+
+          # E.g. src/main/java/com/balaji/leetcode/arrays/TwoSum.java
+          if [ -n "$JAVA_FILE" ]; then
+            CATEGORY=$(echo "$JAVA_FILE" | cut -d'/' -f7 || echo "general")
+            PROBLEM_NAME=$(basename "$JAVA_FILE" .java)
+          fi
+
+          # E.g. leetcode/easy/0001-two-sum.md
+          if [ -n "$DOC_FILE" ]; then
+            DIFFICULTY=$(echo "$DOC_FILE" | cut -d'/' -f2 || echo "medium")
+            DOC_BASENAME=$(basename "$DOC_FILE" .md)
+            if [[ "$DOC_BASENAME" =~ ^([0-9]+)-(.+)$ ]]; then
+              PROBLEM_NUM="${BASH_REMATCH[1]}"
+              PROBLEM_NAME="${BASH_REMATCH[2]}"
+              # Clean up problem name from kebab-case to title case
+              PROBLEM_NAME=$(echo "$PROBLEM_NAME" | sed -r 's/-/ /g' | awk '{for(i=1;i<=NF;i++)sub(/./,toupper(substr($i,1,1)),$i)}1')
+            fi
+          fi
+
+          # Construct PR Title
+          PR_TITLE="feat(${CATEGORY}): solve ${PROBLEM_NUM:+$PROBLEM_NUM - }$PROBLEM_NAME"
+          
+          # Construct PR Body based on template
+          PR_BODY=$(cat << 'EOF' | sed 's/^          //'
+          ## Problem Information
+
+          * **Problem Name:** ${PROBLEM_NAME}
+          * **Problem Link:** https://leetcode.com/problems/$(echo "$PROBLEM_NAME" | tr '[:upper:]' '[:lower:]' | sed -r 's/ /-/g')/
+          * **Difficulty:** ${DIFFICULTY^}
+          * **Pattern:** ${CATEGORY^}
+
+          ## Complexity Analysis
+
+          | Approach | Time Complexity | Space Complexity | Notes |
+          | :--- | :--- | :--- | :--- |
+          | **Optimal** | \$O(N)\$ | \$O(N)\$ | Auto-detected solution |
+
+          ## Implementation Details
+
+          * **Java Class:** \`$JAVA_FILE\`
+          * **Documentation File:** \`$DOC_FILE\`
+
+          ## Description of Approach
+          This PR contains the automated Java 21 solution and markdown documentation for **${PROBLEM_NAME}**.
+
+          ## Checklist
+          - [x] My branch matches the convention \`feature/<category>-<problem-name>\`.
+          - [x] My commits match the Conventional Commits specification.
+          - [x] The solution compiles successfully.
+          - [x] All unit tests pass (\`mvn test\`).
+          - [x] The code complies with Checkstyle parameters (\`mvn checkstyle:check\`).
+          - [x] A dedicated markdown walkthrough file has been created.
+          EOF
+          )
+
+          # Check if PR already exists
+          EXISTS=$(gh pr list --head "${{ github.ref_name }}" --json number --jq '.[0].number' || true)
+          if [ -z "$EXISTS" ]; then
+            echo "Creating Pull Request..."
+            gh pr create \
+              --title "$PR_TITLE" \
+              --body "$PR_BODY" \
+              --base main \
+              --head "${{ github.ref_name }}" \
+              --label "needs-review" \
+              --label "$DIFFICULTY" \
+              --label "$CATEGORY" || true
+          else
+            echo "Pull Request already exists for this branch: PR #$EXISTS. Skipping creation."
+          fi
